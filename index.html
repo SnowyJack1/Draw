@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Universal Draw</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Outfit:wght@300;500;700&display=swap" rel="stylesheet" />
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #FAFAFA;
+      --panel: #111111;
+      --panel-text: #E8E8E8;
+      --accent: #FF4D4D;
+      --accent-glow: rgba(255, 77, 77, 0.3);
+      --subtle: #888;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg);
+      overflow: hidden;
+      height: 100dvh;
+      width: 100vw;
+      cursor: crosshair;
+    }
+
+    /* ── Canvas ── */
+    #canvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      touch-action: none;
+    }
+
+    /* ── Top Bar ── */
+    .top-bar {
+      position: fixed;
+      top: 16px; left: 50%;
+      transform: translateX(-50%);
+      background: var(--panel);
+      border-radius: 40px;
+      padding: 8px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      z-index: 100;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+      user-select: none;
+      animation: slideDown 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      opacity: 0;
+    }
+
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+      to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+
+    .logo {
+      font-family: 'Space Mono', monospace;
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--panel-text);
+      letter-spacing: -0.5px;
+      white-space: nowrap;
+    }
+
+    .logo span { color: var(--accent); }
+
+    .divider {
+      width: 1px;
+      height: 20px;
+      background: rgba(255,255,255,0.15);
+    }
+
+    .user-count {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--subtle);
+      font-weight: 500;
+    }
+
+    .live-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #4ADE80;
+      box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.8); }
+    }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      position: fixed;
+      bottom: 24px; left: 50%;
+      transform: translateX(-50%);
+      background: var(--panel);
+      border-radius: 20px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 100;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      user-select: none;
+      animation: slideUp 0.5s 0.1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      opacity: 0;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+      to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+    }
+
+    /* Color swatches */
+    .colors {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+
+    .swatch {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      position: relative;
+    }
+
+    .swatch:hover { transform: scale(1.15); }
+
+    .swatch.active {
+      border-color: #fff;
+      box-shadow: 0 0 0 2px var(--accent-glow);
+      transform: scale(1.15);
+    }
+
+    .swatch-custom {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      border: 2px dashed rgba(255,255,255,0.3);
+      cursor: pointer;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .swatch-custom input {
+      position: absolute;
+      width: 40px; height: 40px;
+      top: -7px; left: -7px;
+      cursor: pointer;
+      opacity: 0;
+    }
+
+    .swatch-custom-inner {
+      width: 100%; height: 100%;
+      border-radius: 50%;
+      background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red);
+    }
+
+    /* Size slider */
+    .size-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: 4px;
+    }
+
+    .size-label {
+      font-size: 11px;
+      color: var(--subtle);
+      font-family: 'Space Mono', monospace;
+      min-width: 28px;
+      text-align: center;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 80px;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255,255,255,0.15);
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      cursor: pointer;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+
+    /* Buttons */
+    .tool-btn {
+      background: rgba(255,255,255,0.08);
+      border: none;
+      border-radius: 10px;
+      padding: 7px 12px;
+      color: var(--panel-text);
+      font-size: 12px;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .tool-btn:hover { background: rgba(255,255,255,0.15); }
+
+    .tool-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .tool-btn.danger:hover { background: rgba(255, 77, 77, 0.3); color: var(--accent); }
+
+    .tool-btn svg { width: 14px; height: 14px; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      top: 80px; left: 50%;
+      transform: translateX(-50%) translateY(-10px);
+      background: var(--panel);
+      color: var(--panel-text);
+      padding: 10px 20px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 200;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ── Mobile adjustments ── */
+    @media (max-width: 640px) {
+      .toolbar { padding: 8px 10px; gap: 5px; border-radius: 16px; bottom: 16px; }
+      .swatch { width: 22px; height: 22px; }
+      input[type="range"] { width: 50px; }
+      .size-label { display: none; }
+      .top-bar { padding: 6px 14px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <div class="logo"><span>●</span> Universal Draw</div>
+    <div class="divider"></div>
+    <div class="user-count">
+      <div class="live-dot"></div>
+      <span id="count">0</span> online
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <div class="colors">
+      <div class="swatch active" data-color="#111111" style="background:#111111"></div>
+      <div class="swatch" data-color="#FF4D4D" style="background:#FF4D4D"></div>
+      <div class="swatch" data-color="#4ECDC4" style="background:#4ECDC4"></div>
+      <div class="swatch" data-color="#45B7D1" style="background:#45B7D1"></div>
+      <div class="swatch" data-color="#FFEAA7" style="background:#FFEAA7"></div>
+      <div class="swatch" data-color="#DDA0DD" style="background:#DDA0DD"></div>
+      <div class="swatch" data-color="#FFFFFF" style="background:#FFFFFF; border: 1px solid rgba(255,255,255,0.3);"></div>
+      <div class="swatch-custom" title="Custom color">
+        <div class="swatch-custom-inner"></div>
+        <input type="color" id="customColor" value="#FF4D4D" />
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="size-group">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;color:#888;">
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+      <input type="range" id="brushSize" min="1" max="50" value="4" />
+      <span class="size-label" id="sizeLabel">4</span>
+    </div>
+
+    <div class="divider"></div>
+
+    <button class="tool-btn" id="eraserBtn" title="Eraser">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 20H7L3 16l9-9 8 8-4 4"/><path d="m6.5 13.5 5 5"/></svg>
+      Eraser
+    </button>
+
+    <button class="tool-btn danger" id="clearBtn" title="Clear canvas">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M5 6v14a2 2 0 002 2h10a2 2 0 002-2V6"/></svg>
+      Clear
+    </button>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const socket = io();
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    // ── State ──
+    let drawing = false;
+    let lastX = 0, lastY = 0;
+    let currentColor = "#111111";
+    let brushSize = 4;
+    let isEraser = false;
+
+    // ── Canvas setup ──
+    function resize() {
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      canvas.width = window.innerWidth * window.devicePixelRatio;
+      canvas.height = window.innerHeight * window.devicePixelRatio;
+      canvas.style.width = window.innerWidth + "px";
+      canvas.style.height = window.innerHeight + "px";
+      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      ctx.putImageData(data, 0, 0);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+    }
+
+    resize();
+    window.addEventListener("resize", resize);
+
+    // ── Drawing functions ──
+    function drawLine(x1, y1, x2, y2, color, size) {
+      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = size;
+      ctx.globalCompositeOperation = color === "eraser" ? "destination-out" : "source-over";
+      if (color === "eraser") ctx.strokeStyle = "rgba(0,0,0,1)";
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    function getPos(e) {
+      if (e.touches) {
+        const rect = canvas.getBoundingClientRect();
+        return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+      }
+      return { x: e.offsetX, y: e.offsetY };
+    }
+
+    // ── Pointer Events ──
+    function startDraw(e) {
+      e.preventDefault();
+      drawing = true;
+      const pos = getPos(e);
+      lastX = pos.x;
+      lastY = pos.y;
+    }
+
+    function doDraw(e) {
+      if (!drawing) return;
+      e.preventDefault();
+      const pos = getPos(e);
+      const color = isEraser ? "eraser" : currentColor;
+
+      drawLine(lastX, lastY, pos.x, pos.y, color, brushSize);
+
+      // Send to others
+      socket.emit("draw", {
+        x1: lastX / window.innerWidth,
+        y1: lastY / window.innerHeight,
+        x2: pos.x / window.innerWidth,
+        y2: pos.y / window.innerHeight,
+        color,
+        size: brushSize,
+      });
+
+      lastX = pos.x;
+      lastY = pos.y;
+    }
+
+    function stopDraw() {
+      drawing = false;
+    }
+
+    // Mouse
+    canvas.addEventListener("mousedown", startDraw);
+    canvas.addEventListener("mousemove", doDraw);
+    canvas.addEventListener("mouseup", stopDraw);
+    canvas.addEventListener("mouseleave", stopDraw);
+
+    // Touch
+    canvas.addEventListener("touchstart", startDraw, { passive: false });
+    canvas.addEventListener("touchmove", doDraw, { passive: false });
+    canvas.addEventListener("touchend", stopDraw);
+    canvas.addEventListener("touchcancel", stopDraw);
+
+    // ── Socket Events ──
+    socket.on("draw", (data) => {
+      const x1 = data.x1 * window.innerWidth;
+      const y1 = data.y1 * window.innerHeight;
+      const x2 = data.x2 * window.innerWidth;
+      const y2 = data.y2 * window.innerHeight;
+      drawLine(x1, y1, x2, y2, data.color, data.size);
+    });
+
+    socket.on("canvas-state", (strokes) => {
+      strokes.forEach((data) => {
+        const x1 = data.x1 * window.innerWidth;
+        const y1 = data.y1 * window.innerHeight;
+        const x2 = data.x2 * window.innerWidth;
+        const y2 = data.y2 * window.innerHeight;
+        drawLine(x1, y1, x2, y2, data.color, data.size);
+      });
+    });
+
+    socket.on("user-count", (count) => {
+      document.getElementById("count").textContent = count;
+    });
+
+    socket.on("clear-canvas", () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      showToast("Canvas cleared");
+    });
+
+    // ── UI Controls ──
+    // Color swatches
+    document.querySelectorAll(".swatch").forEach((el) => {
+      el.addEventListener("click", () => {
+        document.querySelectorAll(".swatch").forEach((s) => s.classList.remove("active"));
+        el.classList.add("active");
+        currentColor = el.dataset.color;
+        isEraser = false;
+        document.getElementById("eraserBtn").classList.remove("active");
+      });
+    });
+
+    // Custom color
+    document.getElementById("customColor").addEventListener("input", (e) => {
+      currentColor = e.target.value;
+      isEraser = false;
+      document.querySelectorAll(".swatch").forEach((s) => s.classList.remove("active"));
+      document.getElementById("eraserBtn").classList.remove("active");
+    });
+
+    // Brush size
+    const sizeSlider = document.getElementById("brushSize");
+    const sizeLabel = document.getElementById("sizeLabel");
+    sizeSlider.addEventListener("input", () => {
+      brushSize = parseInt(sizeSlider.value);
+      sizeLabel.textContent = brushSize;
+    });
+
+    // Eraser
+    document.getElementById("eraserBtn").addEventListener("click", () => {
+      isEraser = !isEraser;
+      document.getElementById("eraserBtn").classList.toggle("active", isEraser);
+      if (isEraser) {
+        document.querySelectorAll(".swatch").forEach((s) => s.classList.remove("active"));
+      }
+    });
+
+    // Clear
+    document.getElementById("clearBtn").addEventListener("click", () => {
+      if (confirm("Clear the entire canvas for everyone?")) {
+        socket.emit("clear-canvas");
+      }
+    });
+
+    // Toast
+    function showToast(msg) {
+      const toast = document.getElementById("toast");
+      toast.textContent = msg;
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 2000);
+    }
+
+    // Keyboard shortcuts
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "e" || e.key === "E") {
+        document.getElementById("eraserBtn").click();
+      }
+      if (e.key === "[") {
+        brushSize = Math.max(1, brushSize - 2);
+        sizeSlider.value = brushSize;
+        sizeLabel.textContent = brushSize;
+      }
+      if (e.key === "]") {
+        brushSize = Math.min(50, brushSize + 2);
+        sizeSlider.value = brushSize;
+        sizeLabel.textContent = brushSize;
+      }
+    });
+  </script>
+</body>
+</html>
